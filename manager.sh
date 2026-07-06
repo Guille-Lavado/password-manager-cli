@@ -18,6 +18,7 @@ corners[cross]='\xe2\x94\xbc'
 corners[horizontal]='\xe2\x94\x80'
 corners[vertical]='\xe2\x94\x82'	
 
+# Esta función devuelve la longitud más grande entre los elementos de un array
 max-len() {
 	local max=0
 	while read -r element; do
@@ -49,7 +50,7 @@ print-line() {
 	printf "$middle"
 	printf "${corners[horizontal]}%.0s" $(seq 1 $max_len_service)
 	printf "$middle"
-	printf "${corners[horizontal]}%.0s" $(seq 1 $max_len_name)
+	printf "${corners[horizontal]}%.0s" $(seq 1 $max_len_user)
 	printf "$middle"
 	printf "${corners[horizontal]}%.0s" $(seq 1 $PASSWORD_LEN)
 	printf "$right\n"
@@ -65,53 +66,103 @@ print-table() {
 	# Titulos de la tabla
 	head_id="Id"
 	head_service="Service"
-	head_name="Name"
+	head_user="User"
 	head_password="Password"
 
 	# Encontrar el tamaño de la celda más grande por columna
 	local max_len_id=$(echo -en "$head_id\n$rows" | cut -d : -f 1 | max-len)
 	local max_len_service=$(echo -en "S$head_service\n$rows" | cut -d : -f 2 | max-len)
-	local max_len_name=$(echo -en "$head_name\n$rows" | cut -d : -f 3 | max-len)
+	local max_len_user=$(echo -en "$head_user\n$rows" | cut -d : -f 3 | max-len)
 	
 	# Cabeza
-	print-line top $max_len_id $max_len_service $max_len_name
+	print-line top $max_len_id $max_len_service $max_len_user
 	printf "${corners[vertical]}%-*s" $max_len_id $head_id
 	printf "${corners[vertical]}%-*s" $max_len_service $head_service
-	printf "${corners[vertical]}%-*s" $max_len_name $head_name
+	printf "${corners[vertical]}%-*s" $max_len_user $head_user
 	printf "${corners[vertical]}%-*s" $PASSWORD_LEN $head_password
 	printf "${corners[vertical]}\n"
 
 	# Cuerpo
 	while read -r row; do
-		print-line middle $max_len_id $max_len_service $max_len_name
+		print-line middle $max_len_id $max_len_service $max_len_user
 
 		printf "${corners[vertical]}%-*s" $max_len_id $(echo "$row" | cut -d : -f 1)
 		printf "${corners[vertical]}%-*s" $max_len_service $(echo "$row" | cut -d : -f 2)
-		printf "${corners[vertical]}%-*s" $max_len_name $(echo "$row" | cut -d : -f 3)
+		printf "${corners[vertical]}%-*s" $max_len_user $(echo "$row" | cut -d : -f 3)
 		printf "${corners[vertical]}%s" $(echo "$row" | cut -d : -f 4)
 		printf "${corners[vertical]}\n"
 	done < <(echo -en "$rows")
-	print-line bottom $max_len_id $max_len_service $max_len_name
+	print-line bottom $max_len_id $max_len_service $max_len_user
 }
 
-main() {
-	# Leer datos del archivo cifrado
-	local file="$(openssl aes-256-cbc -d -pbkdf2 -in password.enc -pass pass:$temp_password)"
+get-data() {
+	echo -n "Escribe el nombre del servicio: "
+	read -r service
 
-	# echo "$file"
+	# Comprobar que servicio no tenga :
+	echo "$service" | grep : >/dev/null 2>&1
+	if [[ $? -eq 0 ]]; then 
+		echo "Error: El nombre del servicio no debe de llevar :"
+		exit 1 
+	fi
+			
+	echo -n "Escribe el nombre de tu usuario: "
+	read -r user
 
-	# Generar contraseña aleatoria
-	local new_password=$(< /dev/random tr -dc A-Za-z0-9 | head -c $PASSWORD_LEN)
+	# Comprobar que usuario no tenga :
+	echo "$user" | grep : >/dev/null 2>&1
+	if [[ $? -eq 0 ]]; then 
+		echo "Error: El nombre del usuario no debe de llevar :"
+		exit 1 
+	fi
+}
 
-	# Insertar datos en el archivo cifrado
-	# file="${file}\n1:google:guille:${new_password}"
-	
-	# Pintar tabla
-	# echo -e "$file" | grep : | awk -F : '{ print $2, $3, $4 }'
+# Crear archivo password si no existe
+if [[ ! -f password.enc ]]; then
+	echo "nid=1\n0:google:guille:123456789abcdefghijk" | openssl aes-256-cbc -e -pbkdf2 -out password.enc -pass pass:$temp_password
+fi
+
+# Leer datos del archivo cifrado
+file="$(openssl aes-256-cbc -d -pbkdf2 -in password.enc -pass pass:$temp_password)"
+
+# Si no se pasa ningun argumento se pinta la tabla
+if [[ $# -eq 0 ]]; then
 	echo -e "$file" | grep : | print-table
+fi
 
-	# Guardar
-	echo -e "$file" | openssl aes-256-cbc -e -pbkdf2 -out password.enc -pass pass:$temp_password
-}
+while getopts "crud:h" opt; do
+	case "${opt}" in
+		c)
+			# Obtener nombre de usuario y de servicio
+			get-data
 
-main
+			# Obtenemos id oculto en el archivo
+			new_id=$(echo -e "$file" | grep -v : | cut -d '=' -f 2)
+			file=$(echo -e "$file" | sed "s/nid=./nid=$((new_id+1))/")
+
+			# Generar contraseña aleatoria
+			new_password=$(< /dev/random tr -dc A-Za-z0-9 | head -c $PASSWORD_LEN)
+
+			# Insertar datos en el archivo cifrado
+			file="$file\n$new_id:$service:$user:$new_password"
+
+			# Guardar
+			echo -e "$file" | openssl aes-256-cbc -e -pbkdf2 -out password.enc -pass pass:$temp_password
+
+			# Pintar tabla
+			echo -e "$file" | grep : | print-table 
+			;;
+		r) echo -e "$file" | grep : | print-table ;;
+		u) ;;
+		d)
+			# Eliminar línea
+			file=$(echo -e "$file" | sed "/${OPTARG}:/d")
+			# Guardar
+			echo -e "$file" | openssl aes-256-cbc -e -pbkdf2 -out password.enc -pass pass:$temp_password
+			# Pintar tabla
+			echo -e "$file" | grep : | print-table 
+			;;
+		h) echo "Opción -h activada: ${OPTARG}" ;;
+		*) exit 1 ;;
+	esac
+done
