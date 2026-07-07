@@ -18,6 +18,10 @@ corners[cross]='\xe2\x94\xbc'
 corners[horizontal]='\xe2\x94\x80'
 corners[vertical]='\xe2\x94\x82'	
 
+# Colores
+yellow="\e[1m\e[33m"
+ext="\e[0m"
+
 # Esta función devuelve la longitud más grande entre los elementos de un array
 max-len() {
 	local max=0
@@ -76,10 +80,10 @@ print-table() {
 	
 	# Cabeza
 	print-line top $max_len_id $max_len_service $max_len_user
-	printf "${corners[vertical]}%-*s" $max_len_id $head_id
-	printf "${corners[vertical]}%-*s" $max_len_service $head_service
-	printf "${corners[vertical]}%-*s" $max_len_user $head_user
-	printf "${corners[vertical]}%-*s" $PASSWORD_LEN $head_password
+	printf "${corners[vertical]}$yellow%-*s$ext" $max_len_id $head_id
+	printf "${corners[vertical]}$yellow%-*s$ext" $max_len_service $head_service
+	printf "${corners[vertical]}$yellow%-*s$ext" $max_len_user $head_user
+	printf "${corners[vertical]}$yellow%-*s$ext" $PASSWORD_LEN $head_password
 	printf "${corners[vertical]}\n"
 
 	# Cuerpo
@@ -130,7 +134,7 @@ if [[ $# -eq 0 ]]; then
 	echo -e "$file" | grep : | print-table
 fi
 
-while getopts "crud:h" opt; do
+while getopts "cru:d:h" opt; do
 	case "${opt}" in
 		c)
 			# Obtener nombre de usuario y de servicio
@@ -138,7 +142,7 @@ while getopts "crud:h" opt; do
 
 			# Obtenemos id oculto en el archivo
 			new_id=$(echo -e "$file" | grep -v : | cut -d '=' -f 2)
-			file=$(echo -e "$file" | sed "s/nid=./nid=$((new_id+1))/")
+			file=$(echo -e "$file" | sed "s/^nid=.*/nid=$((new_id+1))/")
 
 			# Generar contraseña aleatoria
 			new_password=$(< /dev/random tr -dc A-Za-z0-9 | head -c $PASSWORD_LEN)
@@ -153,7 +157,19 @@ while getopts "crud:h" opt; do
 			echo -e "$file" | grep : | print-table 
 			;;
 		r) echo -e "$file" | grep : | print-table ;;
-		u) ;;
+		u) 
+			# Obtener nombre de usuario y de servicio
+			get-data
+
+			# Modificar archivo
+			file=$(echo -e "$file" | sed "s/^$OPTARG:.*:/$OPTARG:$service:$user:/")
+
+			# Guardar
+			echo -e "$file" | openssl aes-256-cbc -e -pbkdf2 -out password.enc -pass pass:$temp_password
+
+			# Pintar tabla
+			echo -e "$file" | grep : | print-table 
+			;;
 		d)
 			# Eliminar línea
 			file=$(echo -e "$file" | sed "/${OPTARG}:/d")
