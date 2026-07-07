@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
-temp_password="hola1234"
+echo -n "Inserta la password para iniciar el programa: "
+read -s password
+echo
 PASSWORD_LEN=20
 
 # Declarar el array asociativo con las esquinas de la tabla
@@ -21,6 +23,19 @@ corners[vertical]='\xe2\x94\x82'
 # Colores
 yellow="\e[1m\e[33m"
 ext="\e[0m"
+
+# Muestra la ayuda del script
+show-help() {
+    echo -e "${yellow}Password Manager CLI${ext}"
+    echo -e "Uso: $0 [opciones]\n"
+    echo "Opciones:"
+    echo "  -c          Crear una nueva credencial (interactivo)."
+    echo "  -r          Visualizar/renderizar todas las contraseñas guardadas."
+    echo "  -u [id]     Actualizar el servicio y usuario de un ID existente."
+    echo "  -d [id]     Eliminar permanentemente un registro por su ID."
+    echo "  -h          Mostrar este menú de ayuda."
+    echo -e "\nEjemplo: $0 -r"
+}
 
 # Esta función devuelve la longitud más grande entre los elementos de un array
 max-len() {
@@ -50,11 +65,11 @@ print-line() {
 	fi
 	
 	printf "$left"
-	printf "${corners[horizontal]}%.0s" $(seq 1 $max_len_id)
+	printf "${corners[horizontal]}%.0s" $(seq 1 $2)
 	printf "$middle"
-	printf "${corners[horizontal]}%.0s" $(seq 1 $max_len_service)
+	printf "${corners[horizontal]}%.0s" $(seq 1 $3)
 	printf "$middle"
-	printf "${corners[horizontal]}%.0s" $(seq 1 $max_len_user)
+	printf "${corners[horizontal]}%.0s" $(seq 1 $4)
 	printf "$middle"
 	printf "${corners[horizontal]}%.0s" $(seq 1 $PASSWORD_LEN)
 	printf "$right\n"
@@ -75,7 +90,7 @@ print-table() {
 
 	# Encontrar el tamaño de la celda más grande por columna
 	local max_len_id=$(echo -en "$head_id\n$rows" | cut -d : -f 1 | max-len)
-	local max_len_service=$(echo -en "S$head_service\n$rows" | cut -d : -f 2 | max-len)
+	local max_len_service=$(echo -en "$head_service\n$rows" | cut -d : -f 2 | max-len)
 	local max_len_user=$(echo -en "$head_user\n$rows" | cut -d : -f 3 | max-len)
 	
 	# Cabeza
@@ -89,7 +104,6 @@ print-table() {
 	# Cuerpo
 	while read -r row; do
 		print-line middle $max_len_id $max_len_service $max_len_user
-
 		printf "${corners[vertical]}%-*s" $max_len_id $(echo "$row" | cut -d : -f 1)
 		printf "${corners[vertical]}%-*s" $max_len_service $(echo "$row" | cut -d : -f 2)
 		printf "${corners[vertical]}%-*s" $max_len_user $(echo "$row" | cut -d : -f 3)
@@ -104,8 +118,7 @@ get-data() {
 	read -r service
 
 	# Comprobar que servicio no tenga :
-	echo "$service" | grep : >/dev/null 2>&1
-	if [[ $? -eq 0 ]]; then 
+	if [[ "$service" == *":"* ]]; then 
 		echo "Error: El nombre del servicio no debe de llevar :"
 		exit 1 
 	fi
@@ -114,20 +127,31 @@ get-data() {
 	read -r user
 
 	# Comprobar que usuario no tenga :
-	echo "$user" | grep : >/dev/null 2>&1
-	if [[ $? -eq 0 ]]; then 
+	if [[ "$user" == *":"* ]]; then 
 		echo "Error: El nombre del usuario no debe de llevar :"
 		exit 1 
 	fi
 }
 
+save-file() {
+	# Guardar
+	echo -e "$file" | openssl aes-256-cbc -e -pbkdf2 -out password.enc -pass pass:$password
+
+	# Pintar tabla
+	echo -e "$file" | grep : | print-table 
+}
+
 # Crear archivo password si no existe
 if [[ ! -f password.enc ]]; then
-	echo "nid=1\n0:google:guille:123456789abcdefghijk" | openssl aes-256-cbc -e -pbkdf2 -out password.enc -pass pass:$temp_password
+	echo "nid=1" | openssl aes-256-cbc -e -pbkdf2 -out password.enc -pass pass:$password
 fi
 
 # Leer datos del archivo cifrado
-file="$(openssl aes-256-cbc -d -pbkdf2 -in password.enc -pass pass:$temp_password)"
+file="$(openssl aes-256-cbc -d -pbkdf2 -in password.enc -pass pass:$password 2>/dev/null)"
+if [[ $? -eq 1 ]]; then
+	echo "Error: Contraseña incorrecta"
+	exit 1
+fi
 
 # Si no se pasa ningun argumento se pinta la tabla
 if [[ $# -eq 0 ]]; then
@@ -150,13 +174,11 @@ while getopts "cru:d:h" opt; do
 			# Insertar datos en el archivo cifrado
 			file="$file\n$new_id:$service:$user:$new_password"
 
-			# Guardar
-			echo -e "$file" | openssl aes-256-cbc -e -pbkdf2 -out password.enc -pass pass:$temp_password
-
-			# Pintar tabla
-			echo -e "$file" | grep : | print-table 
+			save-file
 			;;
-		r) echo -e "$file" | grep : | print-table ;;
+		r) 
+			echo -e "$file" | grep : | print-table
+			;;
 		u) 
 			# Obtener nombre de usuario y de servicio
 			get-data
@@ -164,21 +186,15 @@ while getopts "cru:d:h" opt; do
 			# Modificar archivo
 			file=$(echo -e "$file" | sed "s/^$OPTARG:.*:/$OPTARG:$service:$user:/")
 
-			# Guardar
-			echo -e "$file" | openssl aes-256-cbc -e -pbkdf2 -out password.enc -pass pass:$temp_password
-
-			# Pintar tabla
-			echo -e "$file" | grep : | print-table 
+			save-file
 			;;
 		d)
 			# Eliminar línea
 			file=$(echo -e "$file" | sed "/${OPTARG}:/d")
-			# Guardar
-			echo -e "$file" | openssl aes-256-cbc -e -pbkdf2 -out password.enc -pass pass:$temp_password
-			# Pintar tabla
-			echo -e "$file" | grep : | print-table 
+			save-file
 			;;
-		h) echo "Opción -h activada: ${OPTARG}" ;;
-		*) exit 1 ;;
+		
+		h) show-help; exit 0 ;;
+		*) show-help; exit 1 ;;
 	esac
 done
