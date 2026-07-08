@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
 
-echo -n "Inserta la password para iniciar el programa: "
-read -s password
-echo
 PASSWORD_LEN=20
 
 # Declarar el array asociativo con las esquinas de la tabla
@@ -36,6 +33,18 @@ show-help() {
     echo "  -h          Mostrar este menú de ayuda."
     echo -e "\nEjemplo: $0 -r"
 }
+
+flag=''
+while getopts "cru:d:h" opt; do
+	case "${opt}" in
+		c) flag='c' ;;
+		r) flag='r' ;;
+		u) flag='u' ;;
+		d) flag='d' ;;
+		h) show-help; exit 0 ;;
+		*) show-help; exit 1 ;;
+	esac
+done
 
 # Esta función devuelve la longitud más grande entre los elementos de un array
 max-len() {
@@ -113,6 +122,7 @@ print-table() {
 	print-line bottom $max_len_id $max_len_service $max_len_user
 }
 
+# Obtener nombre de usuario y de servicio
 get-data() {
 	echo -n "Escribe el nombre del servicio: "
 	read -r service
@@ -134,15 +144,17 @@ get-data() {
 }
 
 save-file() {
-	# Guardar
 	echo -e "$file" | openssl aes-256-cbc -e -pbkdf2 -out password.enc -pass pass:$password
-
-	# Pintar tabla
 	echo -e "$file" | grep : | print-table 
 }
 
+echo -n "Inserta la password para iniciar el programa: "
+read -s password
+echo
+
 # Crear archivo password si no existe
 if [[ ! -f password.enc ]]; then
+	echo "Creando archivo password.enc"
 	echo "nid=1" | openssl aes-256-cbc -e -pbkdf2 -out password.enc -pass pass:$password
 fi
 
@@ -158,43 +170,30 @@ if [[ $# -eq 0 ]]; then
 	echo -e "$file" | grep : | print-table
 fi
 
-while getopts "cru:d:h" opt; do
-	case "${opt}" in
-		c)
-			# Obtener nombre de usuario y de servicio
-			get-data
+if [[ $flag == 'c' ]]; then
+	get-data
 
-			# Obtenemos id oculto en el archivo
-			new_id=$(echo -e "$file" | grep -v : | cut -d '=' -f 2)
-			file=$(echo -e "$file" | sed "s/^nid=.*/nid=$((new_id+1))/")
+	# Obtenemos id oculto en el archivo
+	new_id=$(echo -e "$file" | grep -v : | cut -d '=' -f 2)
+	file=$(echo -e "$file" | sed "s/^nid=.*/nid=$((new_id+1))/")
 
-			# Generar contraseña aleatoria
-			new_password=$(< /dev/random tr -dc A-Za-z0-9 | head -c $PASSWORD_LEN)
+	# Generar contraseña aleatoria
+	new_password=$(< /dev/random tr -dc A-Za-z0-9 | head -c $PASSWORD_LEN)
 
-			# Insertar datos en el archivo cifrado
-			file="$file\n$new_id:$service:$user:$new_password"
+	# Insertar datos en el archivo cifrado
+	file="$file\n$new_id:$service:$user:$new_password"
 
-			save-file
-			;;
-		r) 
-			echo -e "$file" | grep : | print-table
-			;;
-		u) 
-			# Obtener nombre de usuario y de servicio
-			get-data
-
-			# Modificar archivo
-			file=$(echo -e "$file" | sed "s/^$OPTARG:.*:/$OPTARG:$service:$user:/")
-
-			save-file
-			;;
-		d)
-			# Eliminar línea
-			file=$(echo -e "$file" | sed "/${OPTARG}:/d")
-			save-file
-			;;
-		
-		h) show-help; exit 0 ;;
-		*) show-help; exit 1 ;;
-	esac
-done
+	save-file
+elif [[ $flag == 'r' ]]; then
+	# Leer archivo
+	echo -e "$file" | grep : | print-table
+elif [[ $flag == 'u' ]]; then
+	# Modificar archivo
+	get-data
+	file=$(echo -e "$file" | sed "s/^$OPTARG:.*:/$OPTARG:$service:$user:/")
+	save-file
+elif [[ $flag == 'd' ]]; then
+	# Eliminar línea
+	file=$(echo -e "$file" | sed "/${OPTARG}:/d")
+	save-file
+fi
